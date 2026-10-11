@@ -1,27 +1,24 @@
 # CareLink API Reference
 
-Base URL (local): `http://127.0.0.1:8000`
+This is the reference for every endpoint in the API. When running locally the base URL is `http://127.0.0.1:8000`. Everything is JSON, both requests and responses.
 
-All request and response bodies are JSON. Protected endpoints need:
+Except for register, login and token refresh, every endpoint needs an access token in the header:
 
 ```
 Authorization: Bearer <access_token>
 ```
 
-## Contents
-- [Conventions](#conventions)
-- [Authentication](#authentication)
-- [Patients](#patients)
-- [Doctors](#doctors)
-- [Mappings](#mappings)
-- [Stats](#stats)
+If you'd rather click around than read this, the same endpoints are in Swagger at `/api/docs/` and in the Postman collection in the `postman/` folder.
+
+**Contents:** [General notes](#general-notes) · [Authentication](#authentication) · [Patients](#patients) · [Doctors](#doctors) · [Mappings](#mappings) · [Stats](#stats)
 
 ---
 
-## Conventions
+## General notes
 
-### Error format
-Every error uses the same shape:
+### Errors
+
+All errors come back in the same shape, so a client only needs one way to handle them:
 
 ```json
 {
@@ -31,56 +28,73 @@ Every error uses the same shape:
 }
 ```
 
-`errors` is only filled for validation failures (`400`); for other errors it is `null`.
+`errors` is only filled in for validation problems (400). For anything else it's `null` and the `message` explains what happened.
 
-| Status | Meaning |
+| Status | When you'll see it |
 |---|---|
-| `200` / `201` / `204` | Success / created / deleted |
-| `400` | Validation failed |
-| `401` | Missing, invalid or expired token |
-| `403` | Authenticated but not allowed (e.g. editing a doctor you did not create) |
-| `404` | Not found (also returned for records owned by other users) |
-| `409` | Database conflict |
-| `429` | Throttled (register / login) |
+| 200, 201, 204 | It worked (ok, created, deleted) |
+| 400 | The data you sent didn't pass validation |
+| 401 | The token is missing, invalid or expired |
+| 403 | You're logged in but not allowed, e.g. editing a doctor someone else added |
+| 404 | The record doesn't exist, or it belongs to another user |
+| 409 | A database conflict |
+| 429 | Too many register or login attempts |
+
+A note on 404: I return it instead of 403 when you ask for someone else's patient, so the API doesn't reveal whether that record exists.
 
 ### Pagination
-Lists return a plain array. Add `?page=N` to opt in:
+
+By default a list endpoint returns a plain array. If you want pages, add `?page=N`:
 
 ```
 GET /api/patients/?page=2&page_size=5
 ```
+
 ```json
-{ "count": 12, "next": "http://.../?page=3&page_size=5", "previous": "http://.../?page=1&page_size=5", "results": [ ... ] }
+{
+  "count": 12,
+  "next": "http://.../?page=3&page_size=5",
+  "previous": "http://.../?page=1&page_size=5",
+  "results": [ ... ]
+}
 ```
-`page_size` defaults to 10, maximum 100.
+
+`page_size` defaults to 10 and can't go above 100.
 
 ### Search and ordering
-`?search=<text>` and `?ordering=<field>` (prefix with `-` for descending) are available on list endpoints;
-the searchable / orderable fields are listed per resource below.
+
+List endpoints accept `?search=<text>` and `?ordering=<field>`. Put a `-` in front of the field to sort in descending order. The fields you can search and order by are listed under each resource below.
 
 ---
 
 ## Authentication
 
 ### Register
-`POST /api/auth/register/` (public, throttled)
+
+`POST /api/auth/register/` (public, rate limited)
 
 ```json
 { "name": "Alice", "email": "alice@example.com", "password": "Str0ng!Pass123" }
 ```
-`201 Created`
+
+Response, `201 Created`:
+
 ```json
 { "id": 1, "name": "Alice", "email": "alice@example.com" }
 ```
-Rules: valid email, unique (case-insensitive), password must pass Django's password validators.
+
+The email has to be valid and not already taken (the check ignores case, and emails are stored in lowercase). The password has to pass Django's password validators, so very short, common or all-numeric passwords are rejected.
 
 ### Login
-`POST /api/auth/login/` (public, throttled)
+
+`POST /api/auth/login/` (public, rate limited)
 
 ```json
 { "email": "alice@example.com", "password": "Str0ng!Pass123" }
 ```
-`200 OK`
+
+Response, `200 OK`:
+
 ```json
 {
   "user": { "id": 1, "name": "Alice", "email": "alice@example.com" },
@@ -89,60 +103,77 @@ Rules: valid email, unique (case-insensitive), password must pass Django's passw
 }
 ```
 
+Use the `access` token in the `Authorization` header. It expires after 30 minutes by default. Keep the `refresh` token to get a new one.
+
 ### Refresh token
+
 `POST /api/auth/token/refresh/`
+
 ```json
 { "refresh": "<jwt refresh token>" }
 ```
-Returns a new `access` token (and a rotated `refresh` token; the old one is blacklisted).
+
+You get back a new `access` token and a new `refresh` token. The old refresh token is blacklisted, so always save the new one.
 
 ### Logout
-`POST /api/auth/logout/` (authenticated)
+
+`POST /api/auth/logout/` (needs a token)
+
 ```json
 { "refresh": "<jwt refresh token>" }
 ```
-`204 No Content`. The refresh token can no longer be used.
+
+Returns `204 No Content`. After this the refresh token can't be used again. Access tokens can't be revoked, so the current one stays valid until it expires.
 
 ### Profile
-`GET /api/auth/me/` returns the current user. `PATCH /api/auth/me/` updates the name:
+
+`GET /api/auth/me/` returns the logged-in user. `PATCH /api/auth/me/` lets you change your name:
+
 ```json
 { "name": "Alice B" }
 ```
+
 ```json
 { "id": 1, "name": "Alice B", "email": "alice@example.com", "date_joined": "2026-10-10T12:00:00Z" }
 ```
-The email cannot be changed.
+
+The email can't be changed. If you send one it's ignored.
 
 ### Change password
+
 `POST /api/auth/change-password/`
+
 ```json
 { "old_password": "Str0ng!Pass123", "new_password": "An0ther!Pass987" }
 ```
-`200 OK` -> `{ "message": "Password updated." }`
+
+Returns `200 OK` with `{ "message": "Password updated." }`. The old password has to be correct, and the new one goes through the same validators as registration.
 
 ---
 
 ## Patients
 
-Patients belong to the user who created them; you only ever see your own.
+Patients belong to whoever created them, and you only ever see your own.
 
 ### Fields
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | integer | read-only |
-| `name` | string | required, max 150 |
-| `age` | integer | required, 0-130 |
-| `gender` | string | required: `M`, `F`, `O` |
-| `blood_group` | string | optional: `A+ A- B+ B- AB+ AB- O+ O-` |
-| `phone` | string | optional, 7-20 chars: digits, spaces, dashes, optional leading `+` |
+| `name` | string | required, up to 150 characters |
+| `age` | integer | required, 0 to 130 |
+| `gender` | string | required: `M`, `F` or `O` |
+| `blood_group` | string | optional: `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-` |
+| `phone` | string | optional, 7 to 20 characters: digits, spaces, dashes, optional leading `+` |
 | `address` | string | optional |
 | `medical_history` | string | optional |
-| `created_by` | integer | read-only, the owner's user id |
-| `created_at` / `updated_at` | datetime | read-only |
+| `created_by` | integer | read-only, the id of the owner |
+| `created_at`, `updated_at` | datetime | read-only |
 
-### Create
+### Create a patient
+
 `POST /api/patients/`
+
 ```json
 {
   "name": "John Doe",
@@ -154,31 +185,35 @@ Patients belong to the user who created them; you only ever see your own.
   "medical_history": "Hypertension"
 }
 ```
-`201 Created` returns the full patient object.
 
-### List
-`GET /api/patients/`
+Returns `201 Created` with the saved patient.
 
-| Query param | Example | Effect |
+### List patients
+
+`GET /api/patients/` returns only your patients. You can narrow it down with these query parameters:
+
+| Parameter | Example | What it does |
 |---|---|---|
 | `gender` | `?gender=F` | exact match |
-| `blood_group` | `?blood_group=O%2B` | exact match |
-| `min_age` / `max_age` | `?min_age=30&max_age=60` | age range |
-| `search` | `?search=john` | matches name or phone |
-| `ordering` | `?ordering=-age` | `name`, `age`, `created_at` |
+| `blood_group` | `?blood_group=O%2B` | exact match (the `+` has to be URL-encoded as `%2B`) |
+| `min_age`, `max_age` | `?min_age=30&max_age=60` | age range |
+| `search` | `?search=john` | looks in name and phone |
+| `ordering` | `?ordering=-age` | order by `name`, `age` or `created_at` |
 
-### Retrieve / update / delete
+### Get, update or delete one patient
+
 - `GET /api/patients/<id>/`
-- `PUT /api/patients/<id>/` (full update) or `PATCH` (partial)
-- `DELETE /api/patients/<id>/` -> `204`
+- `PUT /api/patients/<id>/` replaces the record, so send all the required fields
+- `PATCH /api/patients/<id>/` changes only the fields you send
+- `DELETE /api/patients/<id>/` returns `204`
 
-Deleting a patient also removes their mappings.
+Deleting a patient also deletes their doctor assignments.
 
 ---
 
 ## Doctors
 
-Doctors are a shared directory: everyone can read them, only the creator can modify or delete.
+Doctors are a shared directory. Anyone who's logged in can read them, but only the user who added a doctor can edit or delete it.
 
 ### Fields
 
@@ -187,14 +222,16 @@ Doctors are a shared directory: everyone can read them, only the creator can mod
 | `id` | integer | read-only |
 | `name` | string | required |
 | `specialization` | string | required |
-| `email` | string | required, unique (case-insensitive) |
-| `phone` | string | optional, same format as patients |
-| `experience_years` | integer | optional, default 0, max 70 |
-| `is_available` | boolean | default `true`; unavailable doctors cannot be newly assigned |
+| `email` | string | required, must be unique (case-insensitive) |
+| `phone` | string | optional, same format as for patients |
+| `experience_years` | integer | optional, defaults to 0, maximum 70 |
+| `is_available` | boolean | defaults to `true`. If `false`, the doctor can't be assigned to new patients |
 | `created_by`, `created_at`, `updated_at` | | read-only |
 
-### Create
+### Add a doctor
+
 `POST /api/doctors/`
+
 ```json
 {
   "name": "Gregory House",
@@ -205,50 +242,57 @@ Doctors are a shared directory: everyone can read them, only the creator can mod
 }
 ```
 
-### List
-`GET /api/doctors/`
+### List doctors
 
-| Query param | Example | Effect |
+`GET /api/doctors/` returns every doctor in the directory.
+
+| Parameter | Example | What it does |
 |---|---|---|
-| `specialization` | `?specialization=cardio` | case-insensitive contains |
-| `is_available` | `?is_available=true` | availability |
-| `min_experience` | `?min_experience=10` | at least N years |
-| `search` | `?search=house` | matches name or specialization |
-| `ordering` | `?ordering=-experience_years` | `name`, `experience_years`, `created_at` |
+| `specialization` | `?specialization=cardio` | case-insensitive partial match |
+| `is_available` | `?is_available=true` | filter by availability |
+| `min_experience` | `?min_experience=10` | at least that many years |
+| `search` | `?search=house` | looks in name and specialization |
+| `ordering` | `?ordering=-experience_years` | order by `name`, `experience_years` or `created_at` |
 
-### Retrieve / update / delete
-- `GET /api/doctors/<id>/`
-- `PUT` / `PATCH /api/doctors/<id>/` (creator only, otherwise `403`)
-- `DELETE /api/doctors/<id>/` (creator only)
+### Get, update or delete one doctor
+
+- `GET /api/doctors/<id>/` is open to any logged-in user
+- `PUT` or `PATCH /api/doctors/<id>/` only for the creator, everyone else gets `403`
+- `DELETE /api/doctors/<id>/` only for the creator
 
 ---
 
 ## Mappings
 
-A mapping assigns a doctor to a patient. Rules:
-- You can only assign doctors to **your own** patients.
-- The same doctor cannot be assigned to the same patient twice.
-- Unavailable doctors cannot be assigned.
-- A patient can have at most **one primary doctor**.
+A mapping connects a doctor to a patient. A few rules apply:
+
+- You can only assign doctors to your own patients.
+- The same doctor can't be assigned to the same patient twice.
+- Doctors marked unavailable can't be assigned.
+- A patient can have at most one primary doctor.
 
 ### Fields
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | integer | read-only |
-| `patient` | integer | patient id (write on create) |
-| `doctor` | integer | doctor id (write on create) |
-| `is_primary` | boolean | default `false` |
-| `notes` | string | optional care notes |
-| `patient_name`, `doctor_name`, `doctor_specialization` | string | read-only convenience fields |
+| `patient` | integer | the patient's id, set when you create the mapping |
+| `doctor` | integer | the doctor's id, set when you create the mapping |
+| `is_primary` | boolean | defaults to `false` |
+| `notes` | string | optional, free-text care notes |
+| `patient_name`, `doctor_name`, `doctor_specialization` | string | read-only, added so you don't need extra requests |
 | `assigned_at` | datetime | read-only |
 
-### Assign a doctor
+### Assign a doctor to a patient
+
 `POST /api/mappings/`
+
 ```json
 { "patient": 1, "doctor": 3, "is_primary": true, "notes": "Lead physician" }
 ```
-`201 Created`
+
+Response, `201 Created`:
+
 ```json
 {
   "id": 7,
@@ -263,28 +307,35 @@ A mapping assigns a doctor to a patient. Rules:
 }
 ```
 
-### List mappings
-`GET /api/mappings/` returns mappings of your patients. Filters: `?patient=1`, `?doctor=3`, `?is_primary=true`,
-`?search=<patient or doctor name>`, `?ordering=-assigned_at`.
+### List all mappings
 
-### Doctors assigned to a patient
-`GET /api/mappings/<patient_id>/` returns the mapping list for that patient (each item includes the doctor's
-id, name and specialization). `404` if the patient is not yours.
+`GET /api/mappings/` returns the mappings for your patients. You can filter with `?patient=1`, `?doctor=3` or `?is_primary=true`, search by patient or doctor name with `?search=`, and sort with `?ordering=-assigned_at`.
+
+### See the doctors assigned to one patient
+
+`GET /api/mappings/<patient_id>/` returns the mappings for that patient, and each one includes the doctor's id, name and specialization. If the patient isn't yours you get a `404`.
+
+Heads up: this URL looks the same as the one used to delete a mapping, but here the number is a **patient id**. For `PATCH` and `DELETE` it's a **mapping id**. I kept it this way because the assignment specifies these URLs.
 
 ### Update a mapping
-`PATCH /api/mappings/<mapping_id>/` can change only `is_primary` and `notes`:
+
+`PATCH /api/mappings/<mapping_id>/` can only change `is_primary` and `notes`. The patient and doctor can't be changed, so to reassign you delete the mapping and create a new one.
+
 ```json
 { "is_primary": true, "notes": "Moved to lead physician" }
 ```
 
+If the patient already has a primary doctor, setting another one returns a `400`. Clear the old one first.
+
 ### Remove a doctor from a patient
-`DELETE /api/mappings/<mapping_id>/` -> `204 No Content`
+
+`DELETE /api/mappings/<mapping_id>/` returns `204 No Content`.
 
 ---
 
 ## Stats
 
-`GET /api/stats/`
+`GET /api/stats/` gives a few summary numbers:
 
 ```json
 {
@@ -300,4 +351,5 @@ id, name and specialization). `404` if the patient is not yours.
   "mappings": { "total": 15, "with_primary_doctor": 9 }
 }
 ```
-Patient and mapping figures cover your own data; doctor figures cover the shared directory.
+
+The patient and mapping numbers only count your own data. The doctor numbers cover the whole shared directory.

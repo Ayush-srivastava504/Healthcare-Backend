@@ -1,151 +1,102 @@
 # CareLink API
 
-A secure REST backend for managing patients, doctors and the care relationships between them.
-Built with **Django**, **Django REST Framework**, **PostgreSQL** and **JWT authentication**.
+This is the backend for a small healthcare app. Users can sign up, log in, and manage patients and doctors, and then assign doctors to patients. It's built with Django, Django REST Framework and PostgreSQL, and uses JWT for authentication.
 
-CareLink is organised around one simple idea: *a user owns the patients they create, doctors form a shared
-directory, and mappings connect the two with a few sensible business rules on top.*
+I wanted the rules to be simple to explain: you own the patients you create, doctors live in a shared directory that everyone can read, and a mapping connects one patient to one doctor.
 
----
+## What it does
 
-## Features
+The assignment asked for registration and login, CRUD for patients and doctors, and patient-doctor mappings. All of that is in. While building it I added a few things I thought a real app would need:
 
-**Core (assignment requirements)**
-- Register / log in with email and password, JWT access + refresh tokens (`djangorestframework-simplejwt`)
-- Full CRUD for patients and doctors
-- Patient-doctor mappings: assign, list, look up by patient, remove
-- PostgreSQL via the Django ORM, secrets in environment variables
-- Validation and consistent error handling on every endpoint
+- Logout that actually invalidates the refresh token, plus a profile endpoint and change-password
+- Search, filtering and ordering on the list endpoints
+- Optional pagination (add `?page=1`; without it you get a plain array)
+- A "primary doctor" flag and notes on each mapping
+- A doctor availability flag, so unavailable doctors can't be assigned
+- A small `/api/stats/` endpoint
+- Swagger docs at `/api/docs/`
+- Rate limiting on register and login
+- A Postman collection and 38 automated tests
 
-**Beyond the brief**
-- **Logout with token blacklisting**, plus profile (`/me/`) and change-password endpoints
-- **Search, filtering and ordering** on patients, doctors and mappings
-- **Opt-in pagination** (`?page=N`), so the plain list responses stay simple arrays
-- **Primary doctor** per patient and free-text **care notes** on each mapping
-- **Doctor availability**: unavailable doctors cannot receive new patients
-- **Dashboard stats** endpoint (patients without a doctor, doctors by specialization, ...)
-- **Interactive API docs** (Swagger UI) generated from the code
-- **Rate limiting** on register / login
-- **One uniform error format** across the whole API
-- Ready-made **Postman collection** and a **38-test** automated suite
+## Stack
 
----
+Python 3.10+, Django 5, DRF, `djangorestframework-simplejwt`, PostgreSQL, `django-filter`, `drf-spectacular` for the docs, and `python-decouple` for reading the `.env` file.
 
-## Tech stack
-
-| Layer | Choice |
-|---|---|
-| Language / framework | Python 3.10+, Django 5, Django REST Framework |
-| Auth | JWT via `djangorestframework-simplejwt` (with token blacklist) |
-| Database | PostgreSQL (SQLite only for the test-suite) |
-| Filtering | `django-filter` + DRF search / ordering |
-| API docs | `drf-spectacular` (OpenAPI 3 + Swagger UI) |
-| Config | `python-decouple` (`.env` file) |
-
----
-
-## Project structure
+## Project layout
 
 ```
 carelink_backend/
-├── config/            # settings, root URLs, wsgi/asgi, test settings
-├── core/              # shared building blocks
-│   ├── mixins.py        # ownership scoping + created_by stamping
-│   ├── pagination.py    # opt-in pagination
-│   ├── exceptions.py    # uniform error format
-│   ├── validators.py    # phone number validator
-│   ├── views.py         # /api/stats/
-│   └── test_utils.py    # test helpers
-├── accounts/          # register, login, logout, profile, change password
-├── patients/          # Patient model, serializer, filters, views
-├── doctors/           # Doctor model, serializer, filters, permissions, views
-├── mappings/          # PatientDoctorMapping model, rules, views
-├── docs/              # API reference and database design
-├── postman/           # importable Postman collection
-├── requirements.txt
-└── .env.example
+├── config/      settings, urls, test settings
+├── core/        shared bits: mixins, pagination, error handler, validators, stats view
+├── accounts/    register, login, logout, profile, change password
+├── patients/    model, serializer, filters, views
+├── doctors/     model, serializer, filters, permissions, views
+├── mappings/    model, serializers, views
+├── docs/        API reference and database notes
+└── postman/     Postman collection
 ```
 
-Each app follows the same layout (`models → serializers → views → urls → tests`), so finding where
-something lives is predictable.
+Every app is laid out the same way (models, serializers, views, urls, tests), so it's easy to find things.
 
----
+## Setup
 
-## Getting started
+You need Python 3.10+ and PostgreSQL running locally.
 
-### 1. Prerequisites
-- Python 3.10 or newer
-- PostgreSQL 13 or newer running locally
-
-### 2. Install
 ```bash
 python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+source venv/bin/activate        # on Windows: venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+cp .env.example .env            # on Windows: Copy-Item .env.example .env
 ```
 
-### 3. Configure
-```bash
-cp .env.example .env
-```
-Edit `.env` (see the table below), then create the database:
+Open `.env` and fill in your database details, then create the database and run the server:
+
 ```bash
 psql -U postgres -c "CREATE DATABASE carelink_db;"
-```
-
-### 4. Migrate and run
-```bash
 python manage.py migrate
-python manage.py createsuperuser     # optional, for /admin/
 python manage.py runserver
 ```
 
-The API is now at `http://127.0.0.1:8000/api/` and the interactive docs at
-`http://127.0.0.1:8000/api/docs/`.
+The API is at `http://127.0.0.1:8000/api/` and the Swagger page is at `http://127.0.0.1:8000/api/docs/`. If you want to use the admin panel, run `python manage.py createsuperuser` first.
 
 ### Environment variables
 
-| Variable | Required | Default | Purpose |
+| Variable | Required | Default | What it's for |
 |---|---|---|---|
-| `SECRET_KEY` | yes | - | Django secret key |
-| `DEBUG` | no | `False` | Debug mode (use `True` locally only) |
-| `ALLOWED_HOSTS` | no | `localhost,127.0.0.1` | Comma-separated host list |
-| `DB_NAME` / `DB_USER` / `DB_PASSWORD` | yes | - | PostgreSQL credentials |
-| `DB_HOST` / `DB_PORT` | no | `localhost` / `5432` | PostgreSQL location |
+| `SECRET_KEY` | yes | | Django secret key |
+| `DEBUG` | no | `False` | Set to `True` for local development only |
+| `ALLOWED_HOSTS` | no | `localhost,127.0.0.1` | Comma-separated list |
+| `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | | PostgreSQL credentials |
+| `DB_HOST`, `DB_PORT` | no | `localhost`, `5432` | Where PostgreSQL is running |
 | `ACCESS_TOKEN_MINUTES` | no | `30` | Access token lifetime |
 | `REFRESH_TOKEN_DAYS` | no | `7` | Refresh token lifetime |
-| `AUTH_THROTTLE_RATE` | no | `10/min` | Rate limit for register / login |
-| `LOG_LEVEL` | no | `INFO` | Application log level |
+| `AUTH_THROTTLE_RATE` | no | `10/min` | Rate limit on register and login |
+| `LOG_LEVEL` | no | `INFO` | Log level |
 
-Generate a strong secret key with:
+To generate a secret key:
+
 ```bash
 python -c "from django.core.management.utils import get_random_secret_key as k; print(k())"
 ```
 
----
-
 ## Running the tests
 
-The suite runs on in-memory SQLite, so no PostgreSQL server is needed:
+The tests run on in-memory SQLite, so you don't need PostgreSQL for them:
 
 ```bash
 python manage.py test --settings=config.test_settings
 ```
 
-It covers authentication, validation, ownership rules, permissions, filtering, pagination, mapping
-business rules and the stats endpoint.
+They cover auth, validation, who can see or change what, filtering, pagination, the mapping rules and the stats endpoint. If you don't have a `.env` file, set `SECRET_KEY`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` to any value first (the tests never connect to them).
 
----
+## Trying it out
 
-## Trying the API
+The easiest way is Postman. Import `postman/CareLink.postman_collection.json`, run Register, then Login. Login saves the token for you, so the other requests work straight away. Creating a patient, doctor or mapping also saves its id for the follow-up requests.
 
-**Swagger UI:** open `/api/docs/`, click *Authorize* and paste the access token.
+You can also use Swagger: open `/api/docs/`, click Authorize and paste in the access token.
 
-**Postman:** import `postman/CareLink.postman_collection.json`. Run *Register*, then *Login*; the login
-request stores the tokens in collection variables, so every other request is authenticated
-automatically. Creating a patient / doctor / mapping also stores its id for the follow-up requests.
+From a terminal with curl:
 
-**curl:**
 ```bash
 curl -X POST http://127.0.0.1:8000/api/auth/register/ \
   -H "Content-Type: application/json" \
@@ -158,56 +109,56 @@ curl -X POST http://127.0.0.1:8000/api/auth/login/ \
 curl http://127.0.0.1:8000/api/patients/ -H "Authorization: Bearer <access_token>"
 ```
 
+## Endpoints
+
+Request and response examples for each of these are in [`docs/API.md`](docs/API.md).
+
+| Method and path | What it does |
+|---|---|
+| `POST /api/auth/register/` | Create an account |
+| `POST /api/auth/login/` | Get access and refresh tokens |
+| `POST /api/auth/logout/` | Blacklist a refresh token |
+| `POST /api/auth/token/refresh/` | Get a new access token |
+| `GET`, `PATCH /api/auth/me/` | View or update your profile |
+| `POST /api/auth/change-password/` | Change your password |
+| `POST`, `GET /api/patients/` | Add a patient / list your patients |
+| `GET`, `PUT`, `PATCH`, `DELETE /api/patients/<id>/` | Read, update or delete a patient |
+| `POST`, `GET /api/doctors/` | Add a doctor / list all doctors |
+| `GET`, `PUT`, `PATCH`, `DELETE /api/doctors/<id>/` | Read, update or delete a doctor |
+| `POST`, `GET /api/mappings/` | Assign a doctor / list mappings |
+| `GET /api/mappings/<patient_id>/` | Doctors assigned to one patient |
+| `PATCH`, `DELETE /api/mappings/<id>/` | Edit notes or primary flag / remove a mapping |
+| `GET /api/stats/` | Some summary numbers |
+
+## Decisions worth explaining
+
+**Patients are private to whoever created them.** This is medical data, so I scoped patients, and the mappings that show who treats them, to the user who made them. If you ask for someone else's patient you get a 404 instead of a 403, so the API never confirms that the record exists.
+
+**Doctors are shared.** Any logged-in user can see and assign any doctor, but only the person who added a doctor can edit or delete it.
+
+**Email is the username.** I used Django's built-in `User` model and store the email as the username. Emails are lowercased and compared case-insensitively. A custom user model would be cleaner for a bigger project, but it felt like too much for this scope.
+
+**Rules are checked twice.** Something like "a patient can only have one primary doctor" is validated in the serializer so the error message is clear, and also enforced by a database constraint in case two requests arrive at the same time.
+
+**Pagination is optional.** The assignment says "retrieve all", so the lists return plain arrays by default. Adding `?page=1` switches to the usual `count / next / previous / results` format.
+
+**One URL, two meanings.** The assignment has `GET /api/mappings/<patient_id>/` and `DELETE /api/mappings/<id>/`, which look identical. I kept both as specified: GET treats the number as a patient id, while PATCH and DELETE treat it as a mapping id. It works, but it's the part of the design I like least, and I'd probably change it to `/api/patients/<id>/doctors/` in a real project.
+
+**Same error format everywhere.** Every error looks like `{"status_code", "message", "errors"}`, which keeps things easy for a frontend to handle.
+
+## Known limitations
+
+- No roles. Every user is treated the same, so there's no admin, doctor or receptionist role yet.
+- Deleting a patient is permanent. There's no soft delete or audit trail, which a real medical system would need.
+- It hasn't been deployed anywhere. For production you'd also want `gunicorn`, `whitenoise` for static files, and `DEBUG=False`.
+
+## Ideas for later
+
+- Appointments between patients and doctors
+- Role-based permissions
+- Soft deletes and an audit log
+- Docker Compose and a CI pipeline that runs the tests
+
 ---
 
-## Endpoint overview
-
-Full request / response examples live in [`docs/API.md`](docs/API.md).
-
-| Area | Method & path | Description |
-|---|---|---|
-| Auth | `POST /api/auth/register/` | Create an account |
-| | `POST /api/auth/login/` | Get access + refresh tokens |
-| | `POST /api/auth/logout/` | Blacklist a refresh token |
-| | `POST /api/auth/token/refresh/` | Exchange a refresh token for a new access token |
-| | `GET` `PATCH /api/auth/me/` | View / update your profile |
-| | `POST /api/auth/change-password/` | Change your password |
-| Patients | `POST` `GET /api/patients/` | Create / list your patients |
-| | `GET` `PUT` `PATCH` `DELETE /api/patients/<id>/` | Read / update / delete a patient |
-| Doctors | `POST` `GET /api/doctors/` | Create / list all doctors |
-| | `GET` `PUT` `PATCH` `DELETE /api/doctors/<id>/` | Read / update / delete a doctor |
-| Mappings | `POST` `GET /api/mappings/` | Assign a doctor / list mappings |
-| | `GET /api/mappings/<patient_id>/` | Doctors assigned to a patient |
-| | `PATCH` `DELETE /api/mappings/<id>/` | Update notes / primary flag, or remove a mapping |
-| Insights | `GET /api/stats/` | Dashboard numbers |
-| Docs | `GET /api/docs/`, `/api/schema/` | Swagger UI and OpenAPI schema |
-
----
-
-## Design decisions
-
-- **Ownership by default.** Patient data is medical data, so patients (and the mappings that reveal who treats
-  them) are scoped to the user who created them. Requests for someone else's record return `404`, not `403`,
-  so the API never confirms that a record exists.
-- **Doctors are a shared directory.** Any signed-in user can read and assign any doctor, but only the user who
-  added a doctor can edit or delete it.
-- **Email is the username.** Login uses the same address used at registration; emails are normalised to
-  lowercase and compared case-insensitively.
-- **Business rules in serializers.** Rules such as "one primary doctor per patient" are validated in the
-  serializer for clear error messages *and* backed by a database constraint so they hold under concurrency.
-- **Pagination is opt-in.** Lists return plain arrays by default; add `?page=1` (and optionally `&page_size=`)
-  to get `{count, next, previous, results}`.
-- **One URL, three jobs.** The brief specifies `GET /api/mappings/<patient_id>/` and
-  `DELETE /api/mappings/<id>/`. They share a URL shape, so `GET` interprets the number as a patient id while
-  `PATCH` / `DELETE` interpret it as a mapping id.
-- **Uniform errors.** Every error returns `{"status_code", "message", "errors"}`, which keeps client-side
-  handling simple.
-
----
-
-## Possible next steps
-
-- Appointments between a patient and a doctor
-- Role-based access (admin / doctor / receptionist)
-- Soft deletes and an audit trail for patient records
-- Docker Compose setup and a CI pipeline running the test-suite
+Built by Ayush Srivastava. Questions or feedback: ayushwww4@gmail.com
